@@ -14,7 +14,7 @@ editor_options:
 
 # ロジスティック判別とは？
 
-## ベイズ判別ルール
+## ベイズ判別ルール {#ベイズ判別ルール}
 
 まず前節までに導入されたベイズ判別ルールについて簡単に振り返る。詳細は[前回発表資料](https://tarohgotoh.github.io/DS-Study/)を参照されたい。
 
@@ -46,8 +46,7 @@ $$
 
 が成り立つ。任意の観測値 $x$ に対して各群での発生確率が0でないと仮定できれば、単純に事後確率の比が1を超えるか否かで判別ルールを定義できる。計算の都合上、両辺に対数を取ることもよく行われる。
 
-さて、2群それぞれのサンプルが、共通の共分散行列を持つ2つの正規分布 $N(\mu_k, \Sigma)$ に従い発生していると仮定する。この場合の判別ルールは、対数密度比が
-\begin{align}
+さて、2群それぞれのサンプルが、共通の共分散行列を持つ2つの正規分布 $N(\mu_k, \Sigma)$ に従い発生していると仮定する。この場合の判別ルールは、対数密度比が \begin{align}
 \log \left\{ \frac{\pi_1 N(x \mid \mu_1, \Sigma)}{\pi_2 N(x \mid \mu_2, \Sigma)} \right\} &= (\Sigma^{-1}(\mu_1 - \mu_2))^\top x - \frac{1}{2}(\mu_1 - \mu_2)^\top \Sigma^{-1} (\mu_1 + \mu_2) + \log(\frac{\pi_1}{\pi_2}) \\
 &= \nu^\top x + \xi
 \end{align}
@@ -83,7 +82,7 @@ $$
 
 ### ロジスティックモデル：共分散行列が共通の正規分布
 
-共分散行列が等しい場合は、 対数密度比が$x$ の一次結合となることは前節「[ベイズ判別ルール]」にて確認済みである。共分散行列が異なる場合は、二次項が残り二次判別となるためロジスティックモデルでは表現できない点に注意が必要である（テキストp.72参照）。
+共分散行列が等しい場合は、 対数密度比が$x$ の一次結合となることは前節「[ベイズ判別ルール](#ベイズ判別ルール)」にて確認済みである。共分散行列が異なる場合は、二次項が残り二次判別となるためロジスティックモデルでは表現できない点に注意が必要である（テキストp.72参照）。
 
 ### ロジスティックモデル：各成分が独立なベルヌーイ分布に従う離散型分布
 
@@ -121,8 +120,737 @@ $$
 
 # ロジスティック判別の性能評価実験
 
-真の分布が正規分布だったときどうか？
+本節では、ベイズ判別との比較を通じてロジスティック判別の使いどころを検証したい。具体的には、下表の論点を一つ一つ検証していきたい。
 
-次元数が多い時どうか？
+| 検証ポイント                                                                               | 説明                                                                                                                                                                                                     |
+|--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| データの発生分布が正規分布だった場合、ロジスティック判別の判別性能はベイズ判別に劣るのか？ | テキストp.85に、真の分布が正規分布だった場合ロジスティック判別は判別効率が落ちると記載がある。これは本当か検証したい。                                                                                   |
+| データの発生分布が正規分布ではなかった場合、ロジスティック判別はベイズ判別に勝るのか？     | テキストp.85に、真の分布が正規分布から離れている場合はロジスティック判別の方が比較的良い結果を与えると記載がある。これは本当か検証したい。                                                               |
+| 分散共分散行列が群間で一致しない場合に、ロジスティック判別はどのように振る舞うか？         | ロジスティック判別の仮定として、分散共分散行列が群間共通である必要がある。しかし現実では群ごとに分散が異なることは自然であり、その場合\"無理やり\"ロジスティック判別を適応した場合の副作用を検証したい。 |
+| データの次元数が大きい場合、ロジスティック判別の判別性能はベイズ判別に勝るのか？           | 本テキストでは、\"無駄な\"パラメータの推定を避ける形でロジスティック判別を導入した。データの次元数が大きいほど、その恩恵は顕著になると考えられる。これは本当か検証したい。                               |
 
-他群判別のとき、ベースの取り方に依存するか？
+## データの発生分布が正規分布の場合
+
+データが２群の正規分布から発生している場合を考える。正規分布が互いに重なっている比較的分離が難しいシチュエーションにて、ベイズ線形判別（LDA）とロジスティック判別の性能評価を実験する。
+
+```{r}
+# データ生成
+library(mvtnorm)
+
+## パラメータ設定
+mean1 <- c(0, 0)  # 正規分布1の平均ベクトル
+mean2 <- c(1.0, 1.0)  # 正規分布2の平均ベクトル
+sigma <- matrix(c(1.0, -0.5, -0.5, 1.0), nrow = 2)  # 共分散行列
+
+## サンプル生成
+set.seed(42)
+sample1 <- rmvnorm(500, mean1, sigma)
+sample2 <- rmvnorm(500, mean2, sigma)
+
+## ラベル付与
+label1 <- rep(1, 500)
+label2 <- rep(2, 500)
+
+## data.frameに格納
+data <- data.frame(x1 = c(sample1[,1], sample2[,1]), 
+                 x2 = c(sample1[,2], sample2[,2]),
+                 y = c(label1, label2))
+plot(data, col = data$y)
+```
+
+```{r}
+# train/test データへの分割
+
+## データフレームを80%/20%に分割する関数を作成
+split_data <- function(data, train_ratio) {
+  # データフレームの行数と分割点を計算
+  n <- nrow(data)
+  train_index <- round(train_ratio * n)
+  
+  # データをランダムに並び替える
+  shuffled_data <- data[sample(n), ]
+  
+  # 分割点を使用してデータを分割
+  train_data <- shuffled_data[1:train_index, ]
+  test_data <- shuffled_data[(train_index + 1):n, ]
+  
+  # 分割されたデータをリストで返す
+  return(list(train_data = train_data, test_data = test_data))
+}
+
+## 分割の実行
+split <- split_data(data, train_ratio = 0.8)
+train_data <- split$train_data
+test_data <- split$test_data
+
+## trainラベル比率の確認
+table(train_data$y)
+## testラベル比率の確認
+table(test_data$y)
+```
+
+```{r}
+# ロジスティック判別
+library(nnet)
+
+## 判別境界の学習
+Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+Logistic
+```
+
+```{r}
+# ベイズ線形判別(LDA)
+library(MASS)
+
+## 判別境界の学習
+LDA <- lda(y ~ x1 + x2, data = train_data)
+LDA
+```
+
+```{r}
+# 判別性能評価
+
+### Logistic: trainデータ誤答率
+Logistic.train <- as.integer(predict(Logistic))
+Logistic.err.train <- mean(train_data$y != Logistic.train)
+### LDA: trainデータ誤答率
+LDA.train <- as.integer(predict(LDA)$class)
+LDA.err.train <- mean(train_data$y != LDA.train)
+
+### Logistic: testデータ誤答率
+Logistic.test <- as.integer(predict(Logistic, test_data))
+Logistic.err.test <- mean(test_data$y != Logistic.test)
+### LDA: testデータ誤答率
+LDA.test <- as.integer(predict(LDA, test_data)$class)
+LDA.err.test <- mean(test_data$y != LDA.test)
+
+cat("Logistic trainデータ誤答率 ", Logistic.err.train,"\n",
+    "LDA trainデータ誤答率 ", LDA.err.train,"\n",
+    "Logistic testデータ誤答率 ", Logistic.err.test,"\n",
+    "LDA testデータ誤答率 ", LDA.err.test,"\n")
+```
+
+```{r, fig.width=12, fig.height=12}
+# 描画
+
+## x1, x2の値域を定義
+r1 <- range(data$x1); r2 <- range(data$x2)
+
+## 判別境界描画のための格子点を作成
+grid <- data.frame(expand.grid(
+  x1 = seq(r1[1], r1[2], length.out = 500),
+  x2 = seq(r2[1], r2[2], length.out = 500)
+))
+
+## 判別境界の作成
+logistic.area <- as.integer(predict(Logistic, grid))
+lda.area <- as.integer(predict(LDA, grid)$class)
+
+## プロット画面を4分割
+par(mfrow = c(2,2))
+
+## trainデータの散布図: Logistic
+plot(grid, col = grey(0.5 + 0.2*logistic.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(Logistic)"
+     )
+## testデータの散布図: Logistic
+plot(grid, col = grey(0.5 + 0.2*logistic.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(test_data$x1, test_data$x2,
+     xlim = r1, ylim = r2,
+     col = test_data$y,
+     pch = test_data$y,
+     main = "Test(Logistic)"
+     )
+
+## trainデータの散布図: LDA
+plot(grid, col = grey(0.5 + 0.2*lda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(LDA)"
+     )
+## testデータの散布図: LDA
+plot(grid, col = grey(0.5 + 0.2*lda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(test_data$x1, test_data$x2,
+     xlim = r1, ylim = r2,
+     col = test_data$y,
+     pch = test_data$y,
+     main = "Test(LDA)"
+     )
+
+## プロット画面の分割解除
+par(mfrow = c(1,1))
+```
+
+ロジスティック判別の性能は、テストデータへの正答率（汎化性能）の意味でベイズ線形判別に劣りそうである。しかし、高々１データセットの結果を以て判断はできないため、各群の距離を変えながら複数回に渡って実験を行う。
+
+```{r}
+# 群間の距離を変えた時の実験
+experiment_distance <- function(d){
+  # データ生成
+  ## パラメータ設定
+  mean1 <- c(0, 0)  # 正規分布1の平均ベクトル
+  mean2 <- c(0, d)  # 正規分布2の平均ベクトル
+  sigma <- matrix(c(1.0, -0.5, -0.5, 1.0), nrow = 2)  # 共分散行列
+  ## サンプル生成
+  set.seed(123)
+  sample1 <- rmvnorm(1000, mean1, sigma)
+  sample2 <- rmvnorm(1000, mean2, sigma)
+  ## ラベル付与
+  label1 <- rep(1, 1000)
+  label2 <- rep(2, 1000)
+  ## data.frameに格納
+  data <- data.frame(x1 = c(sample1[,1], sample2[,1]), 
+                   x2 = c(sample1[,2], sample2[,2]),
+                   y = c(label1, label2))
+  
+  # train/test データへの分割
+  split <- split_data(data, train_ratio = 0.5)
+  train_data <- split$train_data
+  test_data <- split$test_data
+  
+  # 判別境界の学習
+  Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+  LDA <- lda(y ~ x1 + x2, data = train_data)
+  
+  # 判別性能
+  ### Logistic: trainデータ誤答率
+  Logistic.train <- as.integer(predict(Logistic))
+  Logistic.err.train <- mean(train_data$y != Logistic.train)
+  ### LDA: trainデータ誤答率
+  LDA.train <- as.integer(predict(LDA)$class)
+  LDA.err.train <- mean(train_data$y != LDA.train)
+  ### Logistic: testデータ誤答率
+  Logistic.test <- as.integer(predict(Logistic, test_data))
+  Logistic.err.test <- mean(test_data$y != Logistic.test)
+  ### LDA: testデータ誤答率
+  LDA.test <- as.integer(predict(LDA, test_data)$class)
+  LDA.err.test <- mean(test_data$y != LDA.test)
+  
+  return(c(d,
+           Logistic.err.train, Logistic.err.test,
+           LDA.err.train, LDA.err.test))
+}
+```
+
+```{r, fig.width=12, fig.height=8}
+# 群間の距離を変えながら実験
+result <- c()
+for(i in seq(0, 3.0, 0.05)){
+  result <- rbind(result, experiment_distance(i))
+}
+
+df_result <- data.frame(result)
+colnames(df_result) <- c("distance", 
+                         "Logistic_train_loss", "Logistic_test_loss",
+                         "LDA_train_loss", "LDA_test_loss")
+df_result$diff <- df_result$Logistic_test_loss - df_result$LDA_test_loss
+
+# 描画
+library(ggplot2)
+library(gridExtra)
+
+## train lossの描画
+train_loss <- ggplot(df_result, aes(x = distance)) +
+  geom_line(aes(y = Logistic_train_loss), color = "red") +
+  geom_point(aes(y = Logistic_train_loss), color = "red") +
+  geom_line(aes(y = LDA_train_loss), color = "green") +
+  geom_point(aes(y = LDA_train_loss), color = "green") +
+  labs(title = 'Train loss')
+## test lossの描画
+test_loss <- ggplot(df_result, aes(x = distance)) +
+  geom_line(aes(y = Logistic_test_loss), color = "red") +
+  geom_point(aes(y = Logistic_test_loss), color = "red") +
+  geom_line(aes(y = LDA_test_loss), color = "green") +
+  geom_point(aes(y = LDA_test_loss), color = "green") +
+  labs(title = 'Test loss')
+## 性能差の描画
+diff_loss <- ggplot(df_result, aes(x = distance)) +
+  geom_line(aes(y = diff), color = "black") +
+  geom_point(aes(y = diff), color = "black") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = 'Logistic_loss - LDA_loss (Positive = LDA is better)')
+
+## グラフを配置
+top_row <- arrangeGrob(train_loss, test_loss, ncol = 2)
+bottom_row <- diff_loss
+
+grid.arrange(top_row, bottom_row, ncol = 1)
+
+## LDA > Logisticの件数をカウント
+lda_better <- sum(df_result$diff > 0)
+logi_better <-sum(df_result$diff < 0) 
+cat("Logistic is better : ", logi_better, "\nLDA is better : ", lda_better)
+```
+
+たしかに各群の母集団が（共分散が共通の）正規分布であるとき、ベイズ線形判別の方が平均的に見れば汎化性能の意味で優れていそうである。
+
+## データの発生分布が正規分布ではない場合
+
+データが正規分布ではなく、対数正規分布（およびその線形変換）から発生している場合を考える。この場合、ベイズ線形判別・ロジスティック判別ともに仮定を満たしていないが、テキストによればロジスティック判別の方が比較的良い結果を与えるとされている。これは本当か検証したい。
+
+まずは1つのデータセットにて、その判別境界を観察したい。
+
+```{r}
+# データ生成
+## パラメータ設定
+mean1 <- c(0, 0)      # 正規分布1の平均ベクトル
+mean2 <- c(1.0, 1.0)  # 正規分布2の平均ベクトル
+sigma <- matrix(c(1.0, 0, 0, 1.0), nrow = 2)  # 共分散行列
+
+## サンプル生成
+set.seed(123)
+sample1 <- exp(rmvnorm(500, mean1, sigma))
+sample2 <- -exp(rmvnorm(500, mean2, sigma)) + mean2
+## ラベル付与
+label1 <- rep(1, 500)
+label2 <- rep(2, 500)
+## data.frameに格納
+data <- data.frame(x1 = c(sample1[,1], sample2[,1]), 
+                 x2 = c(sample1[,2], sample2[,2]),
+                 y = c(label1, label2))
+plot(data, col = data$y)
+
+## 分割の実行
+split <- split_data(data, train_ratio = 0.8)
+train_data <- split$train_data
+test_data <- split$test_data
+```
+
+```{r}
+## 判別境界の学習
+Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+Logistic
+```
+
+```{r}
+## 判別境界の学習
+LDA <- lda(y ~ x1 + x2, data = train_data)
+LDA
+```
+
+```{r, fig.width=12, fig.height=8}
+# 描画
+
+## x1, x2の値域を定義
+r1 <- c(-10, 10); r2 <- c(-10, 10)
+
+## 判別境界描画のための格子点を作成
+grid <- data.frame(expand.grid(
+  x1 = seq(r1[1], r1[2], length.out = 500),
+  x2 = seq(r2[1], r2[2], length.out = 500)
+))
+
+## 判別境界の作成
+logistic.area <- as.integer(predict(Logistic, grid))
+lda.area <- as.integer(predict(LDA, grid)$class)
+
+## プロット画面を4分割
+par(mfrow = c(2,2))
+
+## trainデータの散布図: Logistic
+plot(grid, col = grey(0.5 + 0.2*logistic.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(Logistic)"
+     )
+## testデータの散布図: Logistic
+plot(grid, col = grey(0.5 + 0.2*logistic.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(test_data$x1, test_data$x2,
+     xlim = r1, ylim = r2,
+     col = test_data$y,
+     pch = test_data$y,
+     main = "Test(Logistic)"
+     )
+
+## trainデータの散布図: LDA
+plot(grid, col = grey(0.5 + 0.2*lda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(LDA)"
+     )
+## testデータの散布図: LDA
+plot(grid, col = grey(0.5 + 0.2*lda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(test_data$x1, test_data$x2,
+     xlim = r1, ylim = r2,
+     col = test_data$y,
+     pch = test_data$y,
+     main = "Test(LDA)"
+     )
+
+## プロット画面の分割解除
+par(mfrow = c(1,1))
+```
+
+では、前節と同様に複数のデータセットにて実験を行い、汎化性能の分布を以て性能評価を行いたい。
+
+```{r}
+# 群が一様分布から発生している場合の実験
+experiment_uniform <- function(seed){
+  ## パラメータ設定
+  mean1 <- c(0, 0)      # 正規分布1の平均ベクトル
+  mean2 <- c(1.0, 1.0)  # 正規分布2の平均ベクトル
+  sigma <- matrix(c(1.0, 0, 0, 1.0), nrow = 2)  # 共分散行列
+  
+  ## サンプル生成
+  set.seed(seed)
+  sample1 <- exp(rmvnorm(500, mean1, sigma))
+  sample2 <- -exp(rmvnorm(500, mean2, sigma)) + mean2
+  ## ラベル付与
+  label1 <- rep(1, 500)
+  label2 <- rep(2, 500)
+  ## data.frameに格納
+  data <- data.frame(x1 = c(sample1[,1], sample2[,1]), 
+                   x2 = c(sample1[,2], sample2[,2]),
+                   y = c(label1, label2))
+  
+  # train/test データへの分割
+  split <- split_data(data, train_ratio = 0.5)
+  train_data <- split$train_data
+  test_data <- split$test_data
+  
+  # 判別境界の学習
+  Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+  LDA <- lda(y ~ x1 + x2, data = train_data)
+  
+  # 判別性能
+  ### Logistic: trainデータ誤答率
+  Logistic.train <- as.integer(predict(Logistic))
+  Logistic.err.train <- mean(train_data$y != Logistic.train)
+  ### LDA: trainデータ誤答率
+  LDA.train <- as.integer(predict(LDA)$class)
+  LDA.err.train <- mean(train_data$y != LDA.train)
+  ### Logistic: testデータ誤答率
+  Logistic.test <- as.integer(predict(Logistic, test_data))
+  Logistic.err.test <- mean(test_data$y != Logistic.test)
+  ### LDA: testデータ誤答率
+  LDA.test <- as.integer(predict(LDA, test_data)$class)
+  LDA.err.test <- mean(test_data$y != LDA.test)
+  
+  return(c(Logistic.err.train, Logistic.err.test,
+           LDA.err.train, LDA.err.test))
+}
+```
+
+```{r, fig.width=12, fig.height=8}
+# 複数のデータセットにて実験
+result <- c()
+for(i in 1:100){
+  result <- rbind(result, experiment_uniform(i))
+}
+
+df_result <- data.frame(result)
+colnames(df_result) <- c("0_train_Logistic", "1_test_Logistic",
+                         "0_train_LDA", "1_test_LDA")
+
+# 描画
+df_tidy <- tidyr::gather(df_result, key = "Experiment", value = "Loss")
+ggplot(df_tidy, aes(x = Experiment, y = Loss)) +
+  geom_boxplot()
+```
+
+たしかに母集団が正規分布に従っていない場合では、平均的にロジスティック判別の方がベイズ線形判別よりも良い性能を達成することが見て取れる。
+
+## 分散共分散行列が群間で一致しない場合
+
+対数事後密度比を一次結合で表現するには、群間の共分散行列が共通であることが必要であった。ここでは、その仮定が満たされない場合にロジスティック判別がどのように振る舞うのか、また２次判別（QDA）との性能評価も併せて行いたい。
+
+データは[前回発表](https://tarohgotoh.github.io/DS-Study/)と同様のものを使用する。
+
+```{r}
+# データ作成
+## グループ1データ
+set.seed(1234)
+g1 <- matrix(rnorm(600), ncol = 2)
+Cor_g1 <- matrix(c(1, .9, .9, 1), 2, 2) 
+L_g1 <- chol(Cor_g1)
+g1 <- g1 %*% L_g1
+g1 <- round(sweep(g1, 2, c(20, 25), "*"))
+g1 <- round(sweep(g1, 2, c(60, 100), "+"))
+
+## グループ2データ
+g2 <- matrix(rnorm(400), ncol = 2)
+Cor_g2 <- matrix(c(1, -.8, -.8, 1), 2, 2)
+L_g2 <- chol(Cor_g2)
+g2 <- g2 %*% L_g2
+g2 <- round(sweep(g2, 2, c(10, 15), "*"))
+g2 <- round(sweep(g2, 2, c(75, 55), "+"))
+
+## 両グループを結合
+data <- data.frame(
+    rbind(g1, g2),
+    class = c(rep(1, nrow(g1)), rep(2, nrow(g2)))
+)
+
+## カラム名の調整
+colnames(data) <- c('x1', 'x2', 'y')
+
+## 描画
+plot(data, col = data$y)
+```
+
+```{r}
+# train/test データへの分割
+split <- split_data(data, train_ratio = 0.8)
+train_data <- split$train_data
+test_data <- split$test_data
+
+## trainラベル比率の確認
+table(train_data$y)
+## testラベル比率の確認
+table(test_data$y)
+```
+
+```{r}
+## 判別境界の学習
+Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+Logistic
+```
+
+```{r}
+## 判別境界の学習(LDA)
+LDA <- lda(y ~ x1 + x2, data = train_data)
+LDA
+```
+
+```{r}
+## 判別境界の学習(QDA)
+QDA <- qda(y ~ x1 + x2, data = train_data)
+QDA
+```
+
+```{r, fig.width=12, fig.height=6}
+# 描画
+
+## x1, x2の値域を定義
+r1 <- range(data$x1); r2 <- range(data$x2)
+
+## 判別境界描画のための格子点を作成
+grid <- data.frame(expand.grid(
+  x1 = seq(r1[1], r1[2], length.out = 500),
+  x2 = seq(r2[1], r2[2], length.out = 500)
+))
+
+## 判別境界の作成
+logistic.area <- as.integer(predict(Logistic, grid))
+lda.area <- as.integer(predict(LDA, grid)$class)
+qda.area <- as.integer(predict(QDA, grid)$class)
+
+## プロット画面を4分割
+par(mfrow = c(1,3))
+
+## trainデータの散布図: Logistic
+plot(grid, col = grey(0.5 + 0.2*logistic.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(Logistic)"
+     )
+
+## trainデータの散布図: LDA
+plot(grid, col = grey(0.5 + 0.2*lda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(LDA)"
+     )
+
+## trainデータの散布図: QDA
+plot(grid, col = grey(0.5 + 0.2*qda.area),
+     xlim = r1, ylim = r2)
+par(new = TRUE)
+plot(train_data$x1, train_data$x2,
+     xlim = r1, ylim = r2,
+     col = train_data$y,
+     pch = train_data$y,
+     main = "Training(QDA)"
+     )
+
+## プロット画面の分割解除
+par(mfrow = c(1,1))
+```
+
+このデータセットにおいては、QDAが尤もらしく見える。また、LDAはロジスティック判別よりも境界面が右下に引っ張られているように見える。では、前節同様に複数のデータセットにおいて汎化性能の比較を行う。
+
+```{r}
+# 群間の共分散行列が等しくない場合の実験
+experiment_diff_covariance <- function(seed){
+  # データ作成
+  ## グループ1データ
+  set.seed(seed)
+  g1 <- matrix(rnorm(600), ncol = 2)
+  Cor_g1 <- matrix(c(1, .9, .9, 1), 2, 2) 
+  L_g1 <- chol(Cor_g1)
+  g1 <- g1 %*% L_g1
+  g1 <- round(sweep(g1, 2, c(20, 25), "*"))
+  g1 <- round(sweep(g1, 2, c(60, 100), "+"))
+  
+  ## グループ2データ
+  g2 <- matrix(rnorm(400), ncol = 2)
+  Cor_g2 <- matrix(c(1, -.8, -.8, 1), 2, 2)
+  L_g2 <- chol(Cor_g2)
+  g2 <- g2 %*% L_g2
+  g2 <- round(sweep(g2, 2, c(10, 15), "*"))
+  g2 <- round(sweep(g2, 2, c(75, 55), "+"))
+  
+  ## 両グループを結合
+  data <- data.frame(
+      rbind(g1, g2),
+      class = c(rep(1, nrow(g1)), rep(2, nrow(g2)))
+  )
+  
+  ## カラム名の調整
+  colnames(data) <- c('x1', 'x2', 'y')
+  
+  # train/test データへの分割
+  split <- split_data(data, train_ratio = 0.8)
+  train_data <- split$train_data
+  test_data <- split$test_data
+  
+  # 判別境界の学習
+  Logistic <- multinom(y ~ x1 + x2, data = train_data, trace = FALSE)
+  LDA <- lda(y ~ x1 + x2, data = train_data)
+  QDA <- qda(y ~ x1 + x2, data = train_data)
+  
+  # 判別性能
+  ### Logistic: testデータ誤答率
+  Logistic.test <- as.integer(predict(Logistic, test_data))
+  Logistic.err.test <- mean(test_data$y != Logistic.test)
+  ### LDA: testデータ誤答率
+  LDA.test <- as.integer(predict(LDA, test_data)$class)
+  LDA.err.test <- mean(test_data$y != LDA.test)
+  ### QDA: testデータ誤答率
+  QDA.test <- as.integer(predict(QDA, test_data)$class)
+  QDA.err.test <- mean(test_data$y != QDA.test)
+  
+  return(c(Logistic.err.test, LDA.err.test, QDA.err.test))
+}
+```
+
+```{r, fig.width=12, fig.height=8}
+# 複数のデータセットにて実験
+result <- c()
+for(i in 1:100){
+  result <- rbind(result, experiment_diff_covariance(i))
+}
+
+df_result <- data.frame(result)
+colnames(df_result) <- c("1_Logistic", "2_LDA", "3_QDA")
+
+# 描画
+df_tidy <- tidyr::gather(df_result, key = "Experiment", value = "Loss")
+ggplot(df_tidy, aes(x = Experiment, y = Loss)) +
+  geom_boxplot()
+```
+
+上図より、共分散行列が群間で異なる場合は汎化性能の意味でQDAが最も優れており、次点にロジスティック判別がくる。正規性仮定から外れた場合は、LDAよりもロジスティック判別が汎化性能において優れていることは前節にて確認したが、ここでも同様の結果が得られた。
+
+以上から、群間での共分散行列が異なる場合はロジスティック判別ではなくQDAを選択するのが良いと思われる。
+
+## データの次元数が大きい場合
+
+ここまでの実験内容を整理すると、
+
+-   各群が正規分布に従う（共分散行列は共通）場合はLDAが最良
+
+-   各群が正規分布に従う（共分散行列は異なる）場合はQDAが最良
+
+-   それ以外の正規性仮定から外れた場合は、ロジスティック判別が最良
+
+である。ロジスティック判別が導入された文脈を思い出してみると、LDAやQDAは判別境界を引くためだけにおいては\"無駄な\"パラメータを推定しているのであった。前節までの高々２次元空間においては、LDA/QDAに軍配が上がるケースにおいても、次元数を大きくするとどこかでロジスティック回帰が勝ると予想される。本節ではそれを検証したい。
+
+検証するにあたっては、\"データの次元数\"のみを実験対象としたいため、ロジスティック判別とLDAでの比較検証とする（QDAは、共分散行列に関する仮定がロジスティック判別と異なり、実験結果の差分が仮定起因なのか次元数起因なのか不明瞭になると考え実験対象外とした）
+
+```{r}
+# 正規分布の次元数を変えた時の実験
+experiment_num_dims <- function(dim, seed){
+  # データ生成
+  ## パラメータ設定
+  set.seed(seed)
+  mean1 <- rnorm(dim, mean=0.3, sd=runif(1))  # 正規分布1の平均ベクトル
+  mean2 <- rnorm(dim, mean=0.0, sd=runif(1))  # 正規分布2の平均ベクトル
+  sigma <- diag(rep(1,dim))          # 共分散行列
+  ## サンプル生成
+  n <- 100
+  sample1 <- rmvnorm(n, mean1, sigma)
+  sample2 <- rmvnorm(n, mean2, sigma)
+  ## ラベル付与
+  label1 <- rep(1, n)
+  label2 <- rep(2, n)
+  ## data.frameに格納
+  data <- data.frame(rbind(sample1, sample2),
+                   y = c(label1, label2))
+  
+  # train/test データへの分割
+  split <- split_data(data, train_ratio = 0.5)
+  train_data <- split$train_data
+  test_data <- split$test_data
+  
+  # 判別境界の学習
+  Logistic <- multinom(y ~ ., data = train_data, trace = FALSE)
+  LDA <- lda(y ~ ., data = train_data)
+  
+  # 判別性能
+  ### Logistic: testデータ誤答率
+  Logistic.test <- as.integer(predict(Logistic, test_data))
+  Logistic.err.test <- mean(test_data$y != Logistic.test)
+  ### LDA: testデータ誤答率
+  LDA.test <- as.integer(predict(LDA, test_data)$class)
+  LDA.err.test <- mean(test_data$y != LDA.test)
+  
+  return(c(dim,Logistic.err.test-LDA.err.test))
+}
+```
+
+```{r fig.height=10, fig.width=20, warning=FALSE}
+# 複数のデータセットにて実験
+result <- c()
+for(d in 2:100)
+  for(s in 1:10)
+    result <- rbind(result, experiment_num_dims(dim=d, seed=s))
+
+df_result <- data.frame(result)
+colnames(df_result) <- c("dim", "loss_diff")
+
+## 性能差の描画
+ggplot(df_result, aes(x = factor(dim), y = loss_diff)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Logistic_loss - LDA_loss (Positive: LDA is better)")
+
+```
+
+各群のサンプルサイズを100としたとき、次元数が70付近まではLDAの方が高い性能であるが、それ以降はロジスティック判別が優れていることがわかる。
+
+以上から、次元数（推定パラメータ数）に対してサンプルサイズが小さい場合は、LDAよりもロジスティック判別の方が適切と言える。
