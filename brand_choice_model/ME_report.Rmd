@@ -1,0 +1,68 @@
+---
+title: "階層ベイズによるブランド選択モデル"
+output: html_document
+date: "2024-04-29"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## ブランド選択モデル
+
+消費者のブランド選択行動は、効用関数および効用最大化原理を用いてモデル化される。いま、消費者 $h$ ・ブランド $i$ ・時期 $t$ における効用関数 $U_{iht}$ が
+
+$$
+U_{iht} = V_{iht} + e_{iht}
+$$
+
+のように書けると仮定する。ただし、 $V_{iht}$は諸々のマーケティング活動等によって規定される確定項であり、 $e_{iht}$ はその他の確率的部分（例：心理的な揺れ）を表している。効用最大化原理とは、「消費者は自身の効用を最大にするような選択肢を取る」という仮定のことである。消費者は常に合理的なのか？と問われれば恐らくNOだが、効用関数には確率的揺れを仮定しているため、そのあたりの「場当たり性」のようなものも考慮されている。
+
+### ２項ブランド選択モデル
+
+いま、ブランドAとBの選択肢があるとする。またシンプルに確定項が $V_{iht} = p_{iht} \beta$ のように各ブランドの値段によってのみ規定されるとする。この場合ブランドAを選択する確率は
+
+$$
+P(p_{Aht}\beta + e_{Aht} > p_{Bht}\beta + e_{Bht}) = P(e_{Aht} - e_{Bht} > -(p_{Aht}-p_{Bht})\beta)
+$$
+
+と書ける。確率変数 $e_{Aht}-e_{Bht}$に極値分布を仮定する場合をロジットモデル、正規分布の場合をプロビットモデルと呼ぶ。途中式は省略するが、ロジットモデルの場合のブランド選択確率は
+
+$$
+\begin{aligned}
+P(\text{Choice A}) &= (1 + \exp\{(p_{Aht}-p_{Bht})\beta\})^{-1} \\
+P(\text{Choice B}) &= 1 - P(\text{Choice A})
+\end{aligned}
+$$
+
+と導出できる。簡単な実験により、最尤推定法でパラメータ $\beta$ を求めてみよう。
+
+```{r}
+# Define Choices
+choices <- c(1,0,0,1,1) # 1:A, 0:B
+price_A <- c(100, 120, 120, 100, 100)
+price_B <- c(110, 110, 110, 110, 110)
+
+# Log-Likelihood of Logit model
+log_likelihood <- function(beta){
+  prob_A <- 1 / (1 + exp((price_A - price_B) * beta))
+  loglikelihood <- sum(choices * log(prob_A) + (1-choices) * log(1 - prob_A))
+  return(-loglikelihood)
+}
+
+# Estimation using optim function
+init_value <- 0
+result <- optim(par = init_value, fn = log_likelihood, method = "BFGS")
+
+print(result$par)
+```
+
+$\beta$ がプラスということは、値段が低い方が相対的に選択されやすいことを意味しており、推定は上手く行っていそうだ。
+
+### 多項ブランド選択モデル
+
+## 参考
+
+-   [ベイズモデリングによるマーケティング分析](https://www.amazon.co.jp/%E3%83%99%E3%82%A4%E3%82%BA%E3%83%A2%E3%83%87%E3%83%AA%E3%83%B3%E3%82%B0%E3%81%AB%E3%82%88%E3%82%8B%E3%83%9E%E3%83%BC%E3%82%B1%E3%83%86%E3%82%A3%E3%83%B3%E3%82%B0%E5%88%86%E6%9E%90-%E7%85%A7%E4%BA%95-%E4%BC%B8%E5%BD%A6/dp/4501623500)
