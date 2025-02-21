@@ -1,0 +1,11 @@
+digraph G {
+	overlap=scale splines=true
+	edge [fontsize=12]
+	node [fillcolor="#cae6df" shape=circle style=filled]
+	node [shape=box style=""]
+	Soda_Sales [label=Soda_Sales]
+	TV_CM [label=TV_CM]
+	Temperature_C [label=Temperature_C]
+	TV_CM -> Soda_Sales [label="0.513\np-val: 0.00"]
+	Temperature_C -> Soda_Sales [label="2.043\np-val: 0.00"]
+}
