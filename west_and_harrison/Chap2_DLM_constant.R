@@ -49,7 +49,7 @@ W_t = 0.1; V_t = 1.0
 
 # Learning
 current_state = list(m = m0, C = C0)
-restults = vector("list", T)
+results = vector("list", T)
 for (t in 1:T){
   next_state = dlm_step(current_state, Y_obs[t], V_t, W_t)
   results[[t]] = next_state
@@ -73,8 +73,8 @@ ggplot(res_df, aes(x = t)) +
   geom_ribbon(aes(ymin = lower, ymax = upper, fill = "95% Credible Interval"), alpha = 0.2) +
   geom_point(aes(y = y, color = "Observation (y)"), alpha = 0.8, size = 1.5) +
   geom_line(aes(y = y, color = "Observation (y)"), alpha = 0.6, linetype = "dashed") +
-  geom_line(aes(y = mu_true, color = "True Level (mu)"), size = 0.8) +
-  geom_line(aes(y = m_pred, color = "Filtered Estimate (m)"), size = 1.0) +
+  geom_line(aes(y = mu_true, color = "True Level (mu)"), linewidth = 0.8) +
+  geom_line(aes(y = m_pred, color = "Filtered Estimate (m)"), linewidth = 1.0) +
   scale_color_manual(values = c(
     "Observation (y)" = "grey70",
     "True Level (mu)" = "black",
